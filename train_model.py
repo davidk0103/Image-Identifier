@@ -1,53 +1,53 @@
 import numpy as np
-import tensorflow as tf
+import os
+import pickle
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+from tensorflow.keras.layers import Dense, Conv2D, MaxPooling2D, Flatten, Dropout
 from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.callbacks import CSVLogger
 
-def load_cifar10_dataset(path):
+def load_local_cifar10(path):
     def unpickle(file):
-        import pickle
         with open(file, 'rb') as fo:
             dict = pickle.load(fo, encoding='bytes')
         return dict
 
-    train_images = []
-    train_labels = []
+    x_train = []
+    y_train = []
 
     for i in range(1, 6):
-        batch = unpickle(f'{path}/data_batch_{i}')
-        train_images.append(batch[b'data'])
-        train_labels.extend(batch[b'labels'])
+        batch = unpickle(os.path.join(path, f'data_batch_{i}'))
+        x_train.append(batch[b'data'])
+        y_train.append(batch[b'labels'])
 
-    train_images = np.concatenate(train_images).reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)
-    train_labels = np.array(train_labels)
+    x_train = np.concatenate(x_train).reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)
+    y_train = np.concatenate(y_train)
 
-    test_batch = unpickle(f'{path}/test_batch')
-    test_images = test_batch[b'data'].reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)
-    test_labels = np.array(test_batch[b'labels'])
+    test_batch = unpickle(os.path.join(path, 'test_batch'))
+    x_test = test_batch[b'data'].reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)
+    y_test = np.array(test_batch[b'labels'])
 
-    return (train_images, train_labels), (test_images, test_labels)
+    return (x_train, y_train), (x_test, y_test)
 
-cifar10_path = 'C:/Users/david/Downloads/cifar-10-python/cifar-10-batches-py'
-(train_images, train_labels), (test_images, test_labels) = load_cifar10_dataset(cifar10_path)
+# Load the CIFAR-10 dataset
+cifar10_path = 'C:\\Users\\david\\Downloads\\cifar-10-python\\cifar-10-batches-py'
+(x_train, y_train), (x_test, y_test) = load_local_cifar10(cifar10_path)
+x_train, x_test = x_train / 255.0, x_test / 255.0
 
-train_images, test_images = train_images / 255.0, test_images / 255.0
-train_labels = to_categorical(train_labels, 10)
-test_labels = to_categorical(test_labels, 10)
+# Convert labels to one-hot encoding
+y_train, y_test = to_categorical(y_train), to_categorical(y_test)
 
+# Data augmentation
 datagen = ImageDataGenerator(
-    rotation_range=20,
-    width_shift_range=0.2,
-    height_shift_range=0.2,
-    shear_range=0.2,
-    zoom_range=0.2,
-    horizontal_flip=True,
-    fill_mode='nearest'
+    rotation_range=15,
+    width_shift_range=0.1,
+    height_shift_range=0.1,
+    horizontal_flip=True
 )
+datagen.fit(x_train)
 
-datagen.fit(train_images)
-
+# Define the model
 model = Sequential([
     Conv2D(32, (3, 3), activation='relu', input_shape=(32, 32, 3)),
     MaxPooling2D((2, 2)),
@@ -60,13 +60,17 @@ model = Sequential([
     Dense(10, activation='softmax')
 ])
 
-model.compile(optimizer='adam',
-              loss='categorical_crossentropy',
-              metrics=['accuracy'])
+# Compile the model
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
-model.fit(datagen.flow(train_images, train_labels, batch_size=32),
-          validation_data=(test_images, test_labels),
-          steps_per_epoch=len(train_images) // 32,
-          epochs=50)
+# Log performance metrics
+csv_logger = CSVLogger('training_log.csv', append=True, separator=';')
 
-model.save('model.h5')
+# Train the model with data augmentation
+model.fit(datagen.flow(x_train, y_train, batch_size=64),
+          epochs=50,
+          validation_data=(x_test, y_test),
+          callbacks=[csv_logger])
+
+# Save the model
+model.save('model_augmented.h5')
